@@ -1,0 +1,21 @@
+entrypoint = "Arete Select/main.py"
+modules = ["python-3.11"]
+
+# 按 Run 鈕會跑這個
+run = "python -u 'Arete Select/main.py'"
+
+[nix]
+channel = "stable-25_05"
+packages = ["glibcLocales"]
+
+[env]
+FLASK_ENV = "development"
+PYTHONUNBUFFERED = "1"
+
+[deployment]
+run = ["python3", "Arete Select/main.py"]
+deploymentTarget = "cloudrun"
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
