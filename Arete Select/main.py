@@ -3,6 +3,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import re
 import os
+import json
 from pathlib import Path
 
 app = Flask(__name__)
@@ -28,14 +29,18 @@ def has_credentials() -> bool:
 
 def gclient():
     """同時支援：
-    1) Cloud Run：從環境變數 CREDENTIALS_JSON 讀取服務帳戶 JSON（建議）
+    1) Vercel/雲端：從環境變數 CREDENTIALS_JSON 讀取服務帳戶 JSON（建議）
     2) Replit 本地開發：讀取 Arete Select/credentials.json 檔案
     """
-    # 優先用環境變數（Cloud Run 用 secrets 注入）
+    # 優先用環境變數（Vercel 上用）
     creds_json = os.getenv("CREDENTIALS_JSON")
     if creds_json:
-        import json
-        info = json.loads(creds_json)
+        try:
+            info = json.loads(creds_json)
+        except json.JSONDecodeError:
+            raise RuntimeError(
+                "CREDENTIALS_JSON 不是合法 JSON。請到 Vercel > Settings > Environment Variables "
+                "把整份 credentials.json 內容『原樣、一行貼上』做為值。")
         creds = ServiceAccountCredentials.from_json_keyfile_dict(info, SCOPES)
         return gspread.authorize(creds)
 
@@ -216,7 +221,7 @@ TEMPLATE = '''
     .no-result { color: #ffd857aa; font-size: 1.0rem; margin-top: 16px;}
     .searching { color: #ffd857; font-weight: 700; font-size: 1.05rem; padding: 14px 0; text-align:center;}
     th, td { min-width: 130px; }
-    th:nth-child(4), td:nth-child(4) { min-width: 170px !important; white-space: normal !重要; }
+    th:nth-child(4), td:nth-child(4) { min-width: 170px !important; white-space: normal !important; }
     @media (max-width: 700px) {
         .main-wrap { padding: 10px 1vw; }
         table, th, td { font-size: 0.95rem; }
@@ -319,16 +324,49 @@ TEMPLATE = '''
 '''
 
 
+# ====== 健康檢查（不碰 Google，方便快速判斷是否為憑證/權限問題）======
+@app.route('/healthz', methods=['GET'])
+def healthz():
+    return "ok"
+
+
 # ====== 路由 ======
 @app.route('/', methods=['GET'])
 def index():
+    # 先嘗試載入類別；若 Google 連線/權限出錯，回友善提示
+    try:
+        categories = get_all_types()
+    except Exception as e:
+        msg = f"讀取 Google 試算表發生錯誤：{e}"
+        help_html = f"""
+        <h2 style="color:#ffd857">⚠️ 無法讀取資料</h2>
+        <div style="color:#fff;line-height:1.6">
+          <p>{msg}</p>
+          <ol>
+            <li>Vercel → Settings → Environment Variables：確認 <b>CREDENTIALS_JSON</b> 已設定，值為 <b>完整且合法的 JSON</b>（不要加引號、不要 json.dumps）。</li>
+            <li>到 Google 試算表（ID：{SPREADSHEET_ID}）把 <b>服務帳戶的 client_email</b> 加為 Viewer/Editor。</li>
+            <li>再按 Redeploy。</li>
+          </ol>
+        </div>
+        """
+        return render_template_string(TEMPLATE.replace(
+            "</div>\n</body>", help_html + "</div>\n</body>"),
+                                      results=[],
+                                      keyword="",
+                                      columns=[],
+                                      categories=[],
+                                      companies=[],
+                                      company_filter="")
+
     keyword = request.args.get('keyword', '').strip()
     company_filter = request.args.get('company_filter', '').strip()
-    categories = get_all_types()
 
     results, columns, companies = [], [], []
     if keyword:
-        results, all_fields = get_results(keyword, categories)
+        try:
+            results, all_fields = get_results(keyword, categories)
+        except Exception as e:
+            return f"查詢發生錯誤：{e}", 500
 
         # 產生唯一 Company 清單（依首次出現順序）
         seen = set()
@@ -378,7 +416,6 @@ def index():
 
 
 if __name__ == '__main__':
+    # 本地（Replit）開發時才會執行；Vercel 由 @vercel/python 匯入 app 即可
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
-
-    # 注意：Dockerfile 用 gunicorn 啟動時，這段不會執行
