@@ -51,8 +51,10 @@ def gclient():
         CREDENTIALS_FILE, SCOPES)
     return gspread.authorize(creds)
   except Exception as e:
+    # 印到日誌，方便在 Vercel Logs 看到
     print("[gclient] auth failed:", repr(e))
     traceback.print_exc()
+    # 往外丟，讓上層顯示友善訊息
     raise
 
 
@@ -110,17 +112,20 @@ def get_results(keyword, categories):
   for sheet in ss.worksheets():
     data = sheet.get_all_records()
     for row in data:
+      # 全空列跳過
       if all(not clean_cell(v) for v in row.values()):
         continue
 
+      # 先清一份 row
       row_cp = {k: clean_cell(v) for k, v in row.items()}
 
+      # 必須有 Title 與 Video url
       title_val = row_cp.get('Title', '')
       url_val = row_cp.get('Video url', '')
       if not title_val or not url_val:
         continue
 
-      # 合併 Type 欄成 'Type'
+      # 合併 Type 欄，統一為 'Type'
       type_val = None
       for k in list(row_cp.keys()):
         if is_type_col(k):
@@ -129,7 +134,7 @@ def get_results(keyword, categories):
       if type_val is not None:
         row_cp['Type'] = type_val
 
-      # 合併公司欄成 'Company'
+      # Company 欄（Company/品牌/公司/brand）
       company_val = ''
       for k in list(row_cp.keys()):
         if is_company_col(k):
@@ -143,18 +148,19 @@ def get_results(keyword, categories):
       # 比對條件
       match_cat = (is_cat and type_val == keyword_for_cat)
 
+      # 關鍵字比對（公司 / 標題 / 任一欄位）
       if kw_lower:
         company_lower = company_val.lower()
         title_lower = title_val.lower()
         any_field_match = any(kw_lower in str(v).lower()
                               for v in row_cp.values())
-        match_kw = (kw_lower
-                    in company_lower) or (kw_lower
-                                          in title_lower) or any_field_match
+        match_kw = (kw_lower in company_lower) or \
+                   (kw_lower in title_lower) or any_field_match
       else:
         match_kw = False
 
       if match_cat or match_kw:
+        # 移除其餘 Type 原欄名鍵，只保留 'Type'
         for delk in list(row_cp.keys()):
           if is_type_col(delk) and delk != 'Type':
             row_cp.pop(delk, None)
@@ -167,7 +173,7 @@ def get_results(keyword, categories):
   return results, all_fields
 
 
-# ====== 偵錯（保留，換 endpoint 名稱以避免重複） ======
+# ====== 偵錯（保留，避免 endpoint 名稱衝突） ======
 @app.route('/__debug', methods=['GET'], endpoint='__debug_page')
 def debug_page():
   key = request.args.get('key', '')
@@ -192,7 +198,7 @@ def debug_page():
     return {"error": repr(e)}, 500
 
 
-# ====== 前端樣板 ======
+# ====== 前端樣板（補回「公司下拉篩選」區塊） ======
 TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="zh-Hant">
@@ -285,6 +291,19 @@ TEMPLATE = '''
         <button type="button" class="chip {% if keyword == cat %}selected{% endif %}" onclick="quickSearch('{{cat}}')">{{cat}}</button>
         {% endfor %}
     </div>
+
+    {% if keyword and companies %}
+    <form method="get" id="company-form" class="filter-row" onsubmit="showLoading()">
+        <input type="hidden" name="keyword" value="{{ keyword }}">
+        <label for="company_select">篩選公司/品牌：</label>
+        <select id="company_select" name="company_filter" onchange="document.getElementById('company-form').submit();">
+            <option value="" {% if not company_filter %}selected{% endif %}>全部</option>
+            {% for c in companies %}
+                <option value="{{ c }}" {% if company_filter == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    {% endif %}
 
     {% if error_msg %}
       <div class="no-result">⚠️ {{ error_msg }}</div>
@@ -408,4 +427,5 @@ def index():
 
 if __name__ == '__main__':
   port = int(os.environ.get("PORT", 8080))
+  # Vercel 不會走到這裡，但本地跑方便
   app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
