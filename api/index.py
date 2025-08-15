@@ -51,10 +51,8 @@ def gclient():
         CREDENTIALS_FILE, SCOPES)
     return gspread.authorize(creds)
   except Exception as e:
-    # 印到日誌，方便在 Vercel Logs 看到
     print("[gclient] auth failed:", repr(e))
     traceback.print_exc()
-    # 往外丟，讓上層顯示友善訊息
     raise
 
 
@@ -112,20 +110,17 @@ def get_results(keyword, categories):
   for sheet in ss.worksheets():
     data = sheet.get_all_records()
     for row in data:
-      # 全空列跳過
       if all(not clean_cell(v) for v in row.values()):
         continue
 
-      # 先清一份 row
       row_cp = {k: clean_cell(v) for k, v in row.items()}
 
-      # 必須有 Title 與 Video url
       title_val = row_cp.get('Title', '')
       url_val = row_cp.get('Video url', '')
       if not title_val or not url_val:
         continue
 
-      # 合併 Type 欄，統一為 'Type'
+      # 合併 Type 欄成 'Type'
       type_val = None
       for k in list(row_cp.keys()):
         if is_type_col(k):
@@ -134,7 +129,7 @@ def get_results(keyword, categories):
       if type_val is not None:
         row_cp['Type'] = type_val
 
-      # Company 欄（Company/品牌/公司/brand）
+      # 合併公司欄成 'Company'
       company_val = ''
       for k in list(row_cp.keys()):
         if is_company_col(k):
@@ -148,7 +143,6 @@ def get_results(keyword, categories):
       # 比對條件
       match_cat = (is_cat and type_val == keyword_for_cat)
 
-      # 關鍵字比對
       if kw_lower:
         company_lower = company_val.lower()
         title_lower = title_val.lower()
@@ -161,7 +155,6 @@ def get_results(keyword, categories):
         match_kw = False
 
       if match_cat or match_kw:
-        # 移除其餘 Type 原欄名鍵，只保留 'Type'
         for delk in list(row_cp.keys()):
           if is_type_col(delk) and delk != 'Type':
             row_cp.pop(delk, None)
@@ -174,14 +167,9 @@ def get_results(keyword, categories):
   return results, all_fields
 
 
-# ====== 健康檢查 / 偵錯 ======
-@app.route("/healthz", methods=["GET"])
-def healthz():
-  return "ok", 200
-
-
-@app.route('/__debug', methods=['GET'])
-def debug():
+# ====== 偵錯（保留，換 endpoint 名稱以避免重複） ======
+@app.route('/__debug', methods=['GET'], endpoint='__debug_page')
+def debug_page():
   key = request.args.get('key', '')
   if not DEBUG_KEY or key != DEBUG_KEY:
     return "forbidden", 403
@@ -420,11 +408,4 @@ def index():
 
 if __name__ == '__main__':
   port = int(os.environ.get("PORT", 8080))
-  # Vercel 不會走到這裡，但本地跑方便
   app.run(host='0.0.0.0', port=port, debug=True, use_reloader=False)
-
-
-# 健康檢查，讓 /healthz 回 200
-@app.route("/healthz", methods=["GET"])
-def healthz():
-  return "ok", 200
