@@ -2,4 +2,4 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / 'Arete Select'))
-from main import app  # main.py 裡的 app = Flask(__name__)
+from main import app
